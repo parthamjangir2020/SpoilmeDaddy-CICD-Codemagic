@@ -1,0 +1,313 @@
+workflows:
+  # Development Build - APK only for testing
+  development-build:
+    name: Development Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: 'develop'
+          include: true
+          source: true
+        - pattern: 'feature/*'
+          include: true
+          source: true
+    environment:
+      android_signing:
+        - keystore_reference
+      groups:
+        - google_play # <-- (Includes GCLOUD_SERVICE_ACCOUNT_CREDENTIALS)
+      vars:
+        PACKAGE_NAME: "com.activeitzone.activeecommercecmsdemoapp"
+        GOOGLE_PLAY_TRACK: internal
+        BUILD_FLAVOR: "dev"
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Set up local.properties
+        script: |
+          echo "flutter.sdk=$HOME/programs/flutter" > "$CM_BUILD_DIR/android/local.properties"
+      - name: Get Flutter packages
+        script: |
+          flutter packages pub get
+      - name: Flutter analyze
+        script: |
+          flutter analyze
+      - name: Flutter unit tests
+        script: |
+          flutter test
+      - name: Build debug APK
+        script: |
+          BUILD_NUMBER=$(($(google-play get-latest-build-number --package-name "$PACKAGE_NAME" --tracks="$GOOGLE_PLAY_TRACK") + 1))
+          flutter build apk --debug --build-name=5.4.0-dev --build-number=$BUILD_NUMBER
+      - name: Build release APK for testing
+        script: |
+          BUILD_NUMBER=$(($(google-play get-latest-build-number --package-name "$PACKAGE_NAME" --tracks="$GOOGLE_PLAY_TRACK") + 1))
+          flutter build apk --release --build-name=5.4.0-dev --build-number=$BUILD_NUMBER
+    artifacts:
+      - build/**/outputs/**/*.apk
+      - build/**/outputs/**/mapping.txt
+      - flutter_drive.log
+    publishing:
+      email:
+        recipients:
+          - user@example.com
+        notify:
+          success: true
+          failure: true
+
+  # Staging Build - AAB for internal testing
+  staging-build:
+    name: Staging Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: 'staging'
+          include: true
+          source: true
+    environment:
+      android_signing:
+        - keystore_reference
+      groups:
+        - google_play
+      vars:
+        PACKAGE_NAME: "com.activeitzone.activeecommercecmsdemoapp"
+        GOOGLE_PLAY_TRACK: internal
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Set up local.properties
+        script: |
+          echo "flutter.sdk=$HOME/programs/flutter" > "$CM_BUILD_DIR/android/local.properties"
+      - name: Get Flutter packages
+        script: |
+          flutter packages pub get
+      - name: Flutter analyze
+        script: |
+          flutter analyze
+      - name: Flutter unit tests
+        script: |
+          flutter test
+      - name: Build AAB
+        script: |
+          flutter build appbundle --release --build-name=1.0.0 --build-number=$(($(google-play get-latest-build-number --package-name "$PACKAGE_NAME" --tracks="$GOOGLE_PLAY_TRACK") + 1))
+    artifacts:
+      - build/**/outputs/**/*.aab
+      - build/**/outputs/**/mapping.txt
+      - flutter_drive.log
+    publishing:
+      email:
+        recipients:
+          - user@example.com
+        notify:
+          success: true
+          failure: true
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal
+        submit_as_draft: true
+
+  # Production Build - AAB for Play Store release
+  production-build:
+    name: Production Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: 'main'
+          include: true
+          source: true
+        - pattern: 'master'
+          include: true
+          source: true
+      tag_patterns:
+        - pattern: 'v*'
+          include: true
+    environment:
+      android_signing:
+        - keystore_reference
+      groups:
+        - google_play
+      vars:
+        PACKAGE_NAME: "com.activeitzone.activeecommercecmsdemoapp"
+        GOOGLE_PLAY_TRACK: production
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Set up local.properties
+        script: |
+          echo "flutter.sdk=$HOME/programs/flutter" > "$CM_BUILD_DIR/android/local.properties"
+      - name: Get Flutter packages
+        script: |
+          flutter packages pub get
+      - name: Flutter analyze
+        script: |
+          flutter analyze
+      - name: Flutter unit tests
+        script: |
+          flutter test
+      - name: Build AAB for Production
+        script: |
+          BUILD_NUMBER=$(($(google-play get-latest-build-number --package-name "$PACKAGE_NAME" --tracks="$GOOGLE_PLAY_TRACK") + 1))
+          flutter build appbundle --release --build-name=5.4.0 --build-number=$BUILD_NUMBER --obfuscate --split-debug-info=build/app/outputs/symbols
+      - name: Build APK for Production (backup)
+        script: |
+          BUILD_NUMBER=$(($(google-play get-latest-build-number --package-name "$PACKAGE_NAME" --tracks="$GOOGLE_PLAY_TRACK") + 1))
+          flutter build apk --release --build-name=5.4.0 --build-number=$BUILD_NUMBER --obfuscate --split-debug-info=build/app/outputs/symbols
+    artifacts:
+      - build/**/outputs/**/*.aab
+      - build/**/outputs/**/*.apk
+      - build/**/outputs/**/mapping.txt
+      - build/app/outputs/symbols/**
+      - flutter_drive.log
+    publishing:
+      email:
+        recipients:
+          - user@example.com
+        notify:
+          success: true
+          failure: true
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: production
+        submit_as_draft: false
+        in_app_update_priority: 0
+        rollout_fraction: 0.1
+        changes_not_sent_for_review: false
+
+  # Manual Build - Both APK and AAB
+  manual-build:
+    name: Manual Build (APK + AAB)
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: '*'
+          include: true
+          source: true
+    when:
+      condition: $CM_BUILD_TRIGGER == "manual"
+    environment:
+      android_signing:
+        - keystore_reference
+      groups:
+        - google_play
+      vars:
+        PACKAGE_NAME: "com.activeitzone.activeecommercecmsdemoapp"
+        GOOGLE_PLAY_TRACK: internal
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Set up local.properties
+        script: |
+          echo "flutter.sdk=$HOME/programs/flutter" > "$CM_BUILD_DIR/android/local.properties"
+      - name: Get Flutter packages
+        script: |
+          flutter packages pub get
+      - name: Flutter analyze
+        script: |
+          flutter analyze
+      - name: Flutter unit tests
+        script: |
+          flutter test
+      - name: Build APK
+        script: |
+          flutter build apk --release --build-name=5.4.0 --build-number=$(($(google-play get-latest-build-number --package-name "$PACKAGE_NAME" --tracks="$GOOGLE_PLAY_TRACK") + 1))
+      - name: Build AAB
+        script: |
+          flutter build appbundle --release --build-name=5.4.0 --build-number=$(($(google-play get-latest-build-number --package-name "$PACKAGE_NAME" --tracks="$GOOGLE_PLAY_TRACK") + 1))
+    artifacts:
+      - build/**/outputs/**/*.apk
+      - build/**/outputs/**/*.aab
+      - build/**/outputs/**/mapping.txt
+      - flutter_drive.log
+    publishing:
+      email:
+        recipients:
+          - user@example.com
+        notify:
+          success: true
+          failure: true
+
+  # iOS Build Workflow
+  ios-build:
+    name: iOS Build
+    max_build_duration: 120
+    instance_type: mac_mini_m1
+    integrations:
+      app_store_connect: codemagic
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: 'main'
+          include: true
+          source: true
+        - pattern: 'ios/*'
+          include: true
+          source: true
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.activeitzone.activeecommercecmsdemoapp
+      groups:
+        - app_store_credentials
+      vars:
+        BUNDLE_ID: "com.activeitzone.activeecommercecmsdemoapp"
+        XCODE_WORKSPACE: "Runner.xcworkspace"
+        XCODE_SCHEME: "Runner"
+        APP_STORE_CONNECT_ISSUER_ID: $APP_STORE_CONNECT_ISSUER_ID
+        APP_STORE_CONNECT_KEY_IDENTIFIER: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        APP_STORE_CONNECT_PRIVATE_KEY: $APP_STORE_CONNECT_PRIVATE_KEY
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Set up code signing settings on Xcode project
+        script: |
+          xcode-project use-profiles
+      - name: Get Flutter packages
+        script: |
+          flutter packages pub get
+      - name: Install pods
+        script: |
+          find . -name "Podfile" -execdir pod install \;
+      - name: Flutter analyze
+        script: |
+          flutter analyze
+      - name: Flutter unit tests
+        script: |
+          flutter test
+      - name: Build ipa for distribution
+        script: |
+          flutter build ipa --release --build-name=5.4.0 --build-number=$(($(app-store-connect get-latest-app-store-build-number "$APP_ID") + 1))
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - flutter_drive.log
+    publishing:
+      email:
+        recipients:
+          - user@example.com
+        notify:
+          success: true
+          failure: true
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        beta_groups:
+          - App Store Connect Users
+        submit_to_app_store: false
